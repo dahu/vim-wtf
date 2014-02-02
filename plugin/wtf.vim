@@ -330,7 +330,7 @@ function! s:WTF_win(fo_obj)
   12
 
   " reset 'modified', so that ":q" can be used to close the window
-  setlocal nomodified
+  setlocal nomodified ft=wtf-window
 
   " Install autocommands to enable mappings in option-window
   noremap  <silent> <buffer> <CR>    <C-\><C-N>:call CR()<CR>
