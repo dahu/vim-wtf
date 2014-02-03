@@ -16,17 +16,19 @@ elseif exists("b:current_syntax")
   " finish
 endif
 
-syn match wtfGroupName     '\w\+\ze\s*:'
-syn match wtfGroupOptions  ':\s*\zs.*'
-syn match wtfGroupEnabled  '(+\w\++)'
-syn match wtfGroupDisabled '(-\w\+-)'
+syn match wtfGroupName       '\w\+\ze\s*:'
+syn match wtfGroupOptions    ':\s*\zs.*'
+syn match wtfGroupEnabled    '(+\w\++)'
+syn match wtfGroupAvailable  '(-\w\+-)'
+syn match wtfGroupDisabled   '(#\w\+#)'
 
 command -nargs=+ HiLink hi def link <args>
 
-HiLink wtfGroupName          Type
+HiLink wtfGroupName          Identifier
 HiLink wtfGroupOptions       Special
-HiLink wtfGroupEnabled       Underlined
-HiLink wtfGroupDisabled      NonText
+HiLink wtfGroupEnabled       Special
+HiLink wtfGroupAvailable     Type
+HiLink wtfGroupDisabled      Comment
 
 delcommand HiLink
 let b:current_syntax = "wtf"

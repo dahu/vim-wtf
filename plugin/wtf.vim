@@ -62,6 +62,7 @@ function! WTF_OptionBuilder(...)
         \,        'comments', '',         'automatic', 'list'
         \,        'hanging',  '',         '',          'long'
         \,        'space',    'keep',     'pack',      'orphan']
+  let fo.groups = ['autowrap', 'comments', 'reformat', 'reindent', 'multibyte']
   let fo.group_opts = {
         \  'autowrap'  : 'tcl1'
         \, 'comments'  : 'ro'
@@ -252,7 +253,16 @@ function! WTF_OptionBuilder(...)
     for o in split(a:opts_set, '\s*,\s*')
       let s = substitute(s, '(' . o . ')', '(+' . o . '+)', '')
     endfor
-    return substitute(s, '(\(\w\+\))', '(-\1-)', 'g')
+    if s =~ '|'
+      if len(a:opts_set) > 0
+        let s = substitute(s, '(\(\w\+\))', '(#\1#)', 'g')
+      else
+        let s = substitute(s, '(\(\w\+\))', '(-\1-)', 'g')
+      endif
+    else
+      let s = substitute(s, '(\(\w\+\))', '(-\1-)', 'g')
+    endif
+    return s
   endfunc
 
   func fo.show(group) dict
@@ -272,7 +282,7 @@ function! WTF_OptionBuilder(...)
       let option_set = a:option
     endif
     let os = 0
-    for f in ['autowrap', 'comments', 'reformat', 'reindent', 'multibyte']
+    for f in self.groups
       exe 'call self.' . f . '(' .  string(option_set[os]) . ')'
       let os += 1
     endfor
@@ -313,7 +323,7 @@ function! s:WTF_win(fo_obj)
   call append('$', '" Type :help wtf-groups for a more detailed explanation. }}}')
   call append('$', '')
 
-  for g in ["autowrap", "comments", "reformat", "reindent", "multibyte"]
+  for g in FO.groups
     let title = printf("%9s", g)
     let group_opts_set = FO.show(g)
     call append('$', title . ' : ' . group_opts_set)
