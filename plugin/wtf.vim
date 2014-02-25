@@ -40,17 +40,6 @@ function! s:SubOpt(opt, subopt)
   return matchstr(a:opt, '\C' . a:subopt)
 endfunction
 
-function! s:ToggleOpt(opts, opt)
-  let opts = a:opts
-  let opt = a:opt
-  if opts =~? opt
-    let opts = substitute(opts, '\<' . opt . '\>', '', 'g')
-  else
-    let opts = opt . ',' . opts
-  endif
-  return opts
-endfunction
-
 " Public Interface: {{{1
 
 function! WTF(...)
@@ -75,6 +64,15 @@ function! WTF(...)
         \, 'reformat'  : "all text (automatic)ally | (autocomments) , (manual) comments with gq"
         \, 'reindent'  : "number/bullet-(list)s | (hang)ing from second line of paragraph"
         \, 'multibyte' : "join-with-(space)s | join-with-(keep)-together | join-(pack)ed"
+        \}
+
+  " [ [exclusive options] [inclusive options] ]
+  let fo.group_opt_sets = {
+        \  'autowrap'  : [[], ['text', 'comments', 'long', 'orphan']]
+        \, 'comments'  : [[], ['insert', 'open']]
+        \, 'reformat'  : [['automatic', 'autocomments'], ['manual']]
+        \, 'reindent'  : [['list', 'hang'], []]
+        \, 'multibyte' : [['space', 'keep', 'pack'], []]
         \}
 
   " TODO: this might not be necessary, or be too complicated
@@ -192,6 +190,8 @@ function! WTF(...)
         let group_opts_set = self.show_reformat()
       elseif g == 'reindent'
         let group_opts_set = self.show_reindent()
+      elseif g == 'multibyte'
+        let group_opts_set = self.show_multibyte()
       else
         let group_opts_set = self.show(g)
       endif
@@ -226,6 +226,23 @@ function! WTF(...)
     echo "hi from cr"
   endfunc
 
+  func fo.toggle_opt(group, opts, opt) dict
+    let group = a:group
+    let opts = a:opts
+    let opt = a:opt
+    if opts =~? opt
+      let opts = substitute(opts, '\<' . opt . '\>', '', 'g')
+    else
+      if index(self.group_opt_sets[group][0], opt) != -1
+        for o in self.group_opt_sets[group][0]
+          let opts = substitute(opts, o, '', 'g')
+        endfor
+      endif
+      let opts .= ',' . opt
+    endif
+    return opts
+  endfunc
+
   func fo.space() dict
     let line = getline('.')
     if line =~ '^\s*\%(".*\)\?$'
@@ -236,7 +253,7 @@ function! WTF(...)
     " TODO: doesn't handle toggling of | separated options correctly
     let opt = expand('<cword>')
     let group = substitute(line, '^\s*\(\w\+\)\s*:.*', '\1', '')
-    let opts = s:ToggleOpt(matchstr(line, ':\s*\zs.*'), opt)
+    let opts = self.toggle_opt(group, matchstr(line, ':\s*\zs.*'), opt)
     exe 'call self.' . group . '(opts)'
     let self.pos = getpos('.')
     call self.render()
@@ -356,15 +373,13 @@ function! WTF(...)
     call self.remove('M')
     if choice =~? '\<k\%[eep]'
       call self.add('m')
-      call self.add('B')
-      call self.remove('M')
-    endif
-    if choice =~? '\<p\%[ack]'
-      call self.add('m')
       call self.remove('B')
       call self.add('M')
-    endif
-    if choice =~? '\<s\%[pace]'
+    elseif choice =~? '\<p\%[ack]'
+      call self.add('m')
+      call self.add('B')
+      call self.remove('M')
+    elseif choice =~? '\<s\%[pace]'
       call self.add('m')
       call self.remove('B')
       call self.remove('M')
@@ -392,16 +407,16 @@ function! WTF(...)
 
   " these groups are special in the way options are combined
   func fo.show_reformat() dict
-    let have_a = self.has('a')
-    let have_c = self.has('c')
-    let have_q = self.has('q')
+    let has_a = self.has('a')
+    let has_c = self.has('c')
+    let has_q = self.has('q')
     let group_opts = []
-    if have_a && have_c
+    if has_a && has_c
       call add(group_opts, 'autocomments')
-    elseif have_a
+    elseif has_a
       call add(group_opts, self.name('a'))
     endif
-    if have_q
+    if has_q
       call add(group_opts, self.name('q'))
     endif
     return join(group_opts, ',')
@@ -414,6 +429,21 @@ function! WTF(...)
       return 'hang'
     endif
     return ''
+  endfunc
+
+  func fo.show_multibyte() dict
+    let has_m = self.has('m')
+    let has_M = self.has('M')
+    let has_B = self.has('B')
+    if has_M
+      return 'keep'
+    elseif has_B
+      return 'pack'
+    elseif has_m
+      return 'space'
+    else
+      return ''
+    endif
   endfunc
 
   func fo.show(group) dict
