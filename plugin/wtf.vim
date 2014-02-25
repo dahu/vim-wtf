@@ -14,11 +14,11 @@
 
 " autowrap:  comments, text, except-long, orphan-control
 " comments:  when-pressing-enter-in-insert-mode, when-opening-newlines
-" reformat:  automatic, autocomments, comments
+" reformat:  automatic, autocomments, manual
 " reindent:  number/bullet-lists, hanging
 " multibyte: join-with-spaces, join-with-keep-together, join-packed
 "
-" Vim's default is: ['comments,text','','comments','','']
+" Vim's default is: ['comments,text','','manual','','']
 
 " Vimscript Setup: {{{1
 " Allow use of line continuation.
@@ -26,40 +26,39 @@ let s:save_cpo = &cpo
 set cpo&vim
 
 " load guard
-" uncomment after plugin development.
-" XXX The conditions are only as examples of how to use them. Change them as
-" needed. XXX
 "if exists("g:loaded_vim-wtf")
 "      \ || v:version < 700
-"      \ || v:version == 703 && !has('patch338')
 "      \ || &compatible
 "  let &cpo = s:save_cpo
 "  finish
 "endif
 "let g:loaded_vim-wtf = 1
 
-" Options: {{{1
-if !exists('g:vim_wtf_some_plugin_option')
-  let g:vim_wtf_some_plugin_option = 0
-endif
-
 " Private Functions: {{{1
-function! s:MyScriptLocalFunction()
-  echom "change MyScriptLocalFunction"
+
+function! s:SubOpt(opt, subopt)
+  return matchstr(a:opt, '\C' . a:subopt)
+endfunction
+
+function! s:ToggleOpt(opts, opt)
+  let opts = a:opts
+  let opt = a:opt
+  if opts =~? opt
+    let opts = substitute(opts, '\<' . opt . '\>', '', 'g')
+  else
+    let opts = opt . ',' . opts
+  endif
+  return opts
 endfunction
 
 " Public Interface: {{{1
 
-function! SubOpt(opt, subopt)
-  return matchstr(a:opt, '\C' . a:subopt)
-endfunction
-
-function! WTF_OptionBuilder(...)
+function! WTF(...)
   let fo = {}
   let fo.opt = {}
   let fo.known_opts = 'tcroqwan2vblmMB1'
   let fo.opts  = ['text',     'comments', 'insert',    'open'
-        \,        'comments', '',         'automatic', 'list'
+        \,        'manual',   '',         'automatic', 'list'
         \,        'hanging',  '',         '',          'long'
         \,        'space',    'keep',     'pack',      'orphan']
   let fo.groups = ['autowrap', 'comments', 'reformat', 'reindent', 'multibyte']
@@ -71,13 +70,16 @@ function! WTF_OptionBuilder(...)
         \, 'multibyte' : 'mMB'
         \}
   let fo.help_text = {
-   \  'autowrap'  : "(text), (comments), except-(long), (orphan)-control"
-   \, 'comments'  : "when-pressing-enter-in-(insert)-mode, when-(open)ing-newlines"
-   \, 'reformat'  : "all text (automatic)ally | (autocomments) | (comments) with gq"
-   \, 'reindent'  : "number/bullet-(list)s | (hang)ing from second line of paragraph"
-   \, 'multibyte' : "join-with-(space)s | join-with-(keep)-together | join-(pack)ed"
-   \}
+        \  'autowrap'  : "(text), (comments), except-(long), (orphan)-control"
+        \, 'comments'  : "when-pressing-enter-in-(insert)-mode, when-(open)ing-newlines"
+        \, 'reformat'  : "all text (automatic)ally | (autocomments) , (manual) comments with gq"
+        \, 'reindent'  : "number/bullet-(list)s | (hang)ing from second line of paragraph"
+        \, 'multibyte' : "join-with-(space)s | join-with-(keep)-together | join-(pack)ed"
+        \}
 
+  " TODO: this might not be necessary, or be too complicated
+  " The idea was to alert the user when &fo sub-options that depended on other
+  " Vim options were set
   let fo.dependent_opts = {
         \  't' : 'textwidth'
         \, 'c' : 'textwidth'
@@ -86,25 +88,40 @@ function! WTF_OptionBuilder(...)
         \, 'n' : 'autoindent'
         \, '2' : 'autoindent'
         \ }
+
+  " extra options tracked by WTF, like &ai, &tw, &com and &flp
+  " NOTE: this is intended to either replace or complement the above
+  let fo.extra_options = {}
+
   let fo.added_c_for_auto_comments = 0
+
+  " for re-positioning the cursor after re-render()
+  let fo.pos = []
 
   func fo.name(opt) dict
     return self.opts[stridx(self.known_opts, a:opt)]
   endfunc
 
-  func fo.set(...) dict
+  " Takes the buffer-number to act upon
+  func fo.set_bufnr(...) dict
     if a:0
-      let from_fo = a:1
+      let self.bufnr = a:1
     else
-      let from_fo = &formatoptions
+      let self.bufnr = bufnr('.')
     endif
+    let opt_fo = getbufvar(self.bufnr, '&fo')
     for o in split(self.known_opts, '\zs')
-      let self.opt['_' . o] = SubOpt(from_fo, o)
+      let self.opt['_' . o] = s:SubOpt(opt_fo, o)
     endfor
     " WTF doesn't respect old vi settings
     for o in split('wvb', '\zs')
       call self.remove(o)
     endfor
+    " Collect the extra related options for wtf
+    call self.set_opt('ai', getbufvar(self.bufnr, '&ai'))
+    call self.set_opt('tw', getbufvar(self.bufnr, '&tw'))
+    call self.set_opt('com', getbufvar(self.bufnr, '&com'))
+    call self.set_opt('flp', getbufvar(self.bufnr, '&flp'))
   endfunc
 
   func fo.remove(subopt) dict
@@ -134,13 +151,121 @@ function! WTF_OptionBuilder(...)
     return 0
   endfunc
 
+  " TODO: NO! This needs to happen on bnum, not curbuf
   func fo.apply() dict
     exe 'set fo=' . self.to_option()
   endfunc
 
+  func fo.set_opt(opt, val) dict
+    let self.extra_options[a:opt] = a:val
+  endfunc
+
+  func fo.get_opt(opt) dict
+    if a:opt == 'fo'
+      return self.to_option()
+    else
+      return self.extra_options[a:opt]
+    endif
+  endfunc
+
+  func fo.render() dict
+    " delete any existing content
+    % delete
+    " Insert help and each formatoption group with choices
+    let bnum  = self.bufnr
+    let bname = bufname(self.bufnr)
+    call append('$',   '" Showing &formatoption details for buffer ' . bnum . '.            {{{')
+    call append('$', '"   ' . bname)
+    call append('$', '" Each pair of lines show a &formatoption group')
+    call append('$', '"   and the available choices it can take.')
+    call append('$', '"   * Combinable choices separated by comma (,)')
+    call append('$', '"   * Exclusive choices separated by pipe   (|)')
+    call append('$', '" Edit each group line manually and press <CR> to update')
+    call append('$', '"   the   set fo=...   line at the bottom of this window.')
+    call append('$', '"   Yank this setting to use it in your desired buffer.')
+    call append('$', '" Type :help wtf-groups for a more detailed explanation. }}}')
+    call append('$', '')
+
+    for g in self.groups
+      let title = printf("%9s", g)
+      if g == 'reformat'
+        let group_opts_set = self.show_reformat()
+      elseif g == 'reindent'
+        let group_opts_set = self.show_reindent()
+      else
+        let group_opts_set = self.show(g)
+      endif
+      call append('$', title . ' : ' . group_opts_set)
+      call append('$', repeat(' ', 12) . self.help(g, group_opts_set))
+    endfor
+
+    call append('$', '')
+    call append('$', '" Options for ' . bname . ' (buffer ' . bnum . '):')
+    call append('$', '" set fo='  . self.get_opt('fo'))
+    call append('$', '" set ai='  . self.get_opt('ai'))
+    call append('$', '" set tw='  . self.get_opt('tw'))
+    call append('$', '" set com=' . self.get_opt('com'))
+    call append('$', '" set flp=' . self.get_opt('flp'))
+
+    " delete first line which is an artifact of using append('$')
+    1
+    delete
+
+    if self.pos == []
+      12
+      normal! 03w
+    else
+      call setpos('.', self.pos)
+    endif
+
+    " reset 'modified', so that ":q" can be used to close the window
+    setlocal nomodified ft=wtf-window
+  endfunc
+
+  func fo.cr() dict
+    echo "hi from cr"
+  endfunc
+
+  func fo.space() dict
+    let line = getline('.')
+    if line =~ '^\s*\%(".*\)\?$'
+      return
+    elseif line =~ '^\s\s\+'
+      let line = getline(line('.')-1)
+    endif
+    " TODO: doesn't handle toggling of | separated options correctly
+    let opt = expand('<cword>')
+    let group = substitute(line, '^\s*\(\w\+\)\s*:.*', '\1', '')
+    let opts = s:ToggleOpt(matchstr(line, ':\s*\zs.*'), opt)
+    exe 'call self.' . group . '(opts)'
+    let self.pos = getpos('.')
+    call self.render()
+  endfunc
+
+  func fo.setup_wtf_win() dict
+    new wtf-window
+    let b:wtf = self
+    let self.wtf_win_bufnr = bufnr('.')
+    setlocal noro buftype=nofile fdm=marker
+
+    " Install autocommands to enable mappings in option-window
+    noremap  <silent> <buffer> <CR>    <C-\><C-N>:call b:wtf.cr()<CR>
+    inoremap <silent> <buffer> <CR>    <Esc>:call b:wtf.cr()<CR>
+    noremap  <silent> <buffer> <Space> :call b:wtf.space()<CR>
+
+    " Make the buffer be deleted when the window is closed.
+    setlocal buftype=nofile bufhidden=delete noswapfile
+
+    augroup wtfwin
+      au! BufUnload,BufHidden wtf-window nested au! wtfwin
+    augroup END
+
+    call self.render()
+  endfunc
+
   " Builder Interface - separated into logical formatoption groups
 
-  " choices: comments, text, except-long, orphan-control, none|off
+  " choices: comments, text, except-long, orphan-control
   func fo.autowrap(choice) dict
     let choice = a:choice
     let opt = ''
@@ -182,7 +307,7 @@ function! WTF_OptionBuilder(...)
     endif
   endfunc
 
-  " choices: automatic|[manual], comments
+  " choices: automatic | autocomments , manual
   func fo.reformat(choice) dict
     let choice = a:choice
     let opt = ''
@@ -201,7 +326,7 @@ function! WTF_OptionBuilder(...)
         endif
       endif
     endif
-    if choice =~? '\<c\%[omment]'
+    if choice =~? '\<m\%[anual]'
       call self.add('q')
     endif
   endfunc
@@ -265,6 +390,32 @@ function! WTF_OptionBuilder(...)
     return s
   endfunc
 
+  " these groups are special in the way options are combined
+  func fo.show_reformat() dict
+    let have_a = self.has('a')
+    let have_c = self.has('c')
+    let have_q = self.has('q')
+    let group_opts = []
+    if have_a && have_c
+      call add(group_opts, 'autocomments')
+    elseif have_a
+      call add(group_opts, self.name('a'))
+    endif
+    if have_q
+      call add(group_opts, self.name('q'))
+    endif
+    return join(group_opts, ',')
+  endfunc
+
+  func fo.show_reindent() dict
+    if self.has('n')
+      return 'list'
+    elseif self.has('2')
+      return 'hang'
+    endif
+    return ''
+  endfunc
+
   func fo.show(group) dict
     let group_opts = []
     for o in split(self.group_opts[a:group], '\zs')
@@ -290,92 +441,15 @@ function! WTF_OptionBuilder(...)
   endfunc
 
   func fo.vim_default() dict
-    call self.wtf('comments,text', '', 'comments', '', '')
+    call self.wtf('comments,text', '', 'manual', '', '')
   endfunc
 
-  call call(fo.set, a:000, fo)
+  call call(fo.set_bufnr, a:000, fo)
   return fo
 endfunction
 
-function! WTF(fo)
-  call s:WTF_win(WTF_OptionBuilder(a:fo))
-endfunction
-
-function! s:WTF_win(fo_obj)
-  let FO = a:fo_obj
-
-  new wtf-window
-  setlocal noro buftype=nofile fdm=marker
-
-  " Insert help and each formatoption group with choices
-  " TODO: get the real bnum and printf it three digits wide; real bname
-  let bnum = 0
-  let bname = '~/foo.txt'
-  call append('$',   '" Showing &formatoption details for buffer ' . bnum . '.            {{{')
-  call append('$', '"   #' . bname . '#')
-  call append('$', '" Each pair of lines show a &formatoption group')
-  call append('$', '"   and the available choices it can take.')
-  call append('$', '"   * Combinable choices separated by comma (,)')
-  call append('$', '"   * Exclusive choices separated by pipe   (|)')
-  call append('$', '" Edit each group line manually and press <CR> to update')
-  call append('$', '"   the   set fo=...   line at the bottom of this window.')
-  call append('$', '"   Yank this setting to use it in your desired buffer.')
-  call append('$', '" Type :help wtf-groups for a more detailed explanation. }}}')
-  call append('$', '')
-
-  for g in FO.groups
-    let title = printf("%9s", g)
-    let group_opts_set = FO.show(g)
-    call append('$', title . ' : ' . group_opts_set)
-    call append('$', repeat(' ', 12) . FO.help(g, group_opts_set))
-  endfor
-
-  call append('$', '')
-  call append('$', '" set fo=' . FO.to_option())
-
-  " delete first line which is an artifact of using append('$')
-  1
-  delete
-  " the formatoptions groups start on line:
-  12
-
-  " reset 'modified', so that ":q" can be used to close the window
-  setlocal nomodified ft=wtf-window
-
-  " Install autocommands to enable mappings in option-window
-  noremap  <silent> <buffer> <CR>    <C-\><C-N>:call CR()<CR>
-  inoremap <silent> <buffer> <CR>    <Esc>:call s:CR()<CR>
-  noremap  <silent> <buffer> <Space> :call s:Space()<CR>
-
-  " Make the buffer be deleted when the window is closed.
-  setlocal buftype=nofile bufhidden=delete noswapfile
-
-  augroup wtfwin
-    au! BufUnload,BufHidden wtf-window nested
-          \ call s:unload() | delfun s:unload
-  augroup END
-
-  function! s:unload()
-    delfun s:CR
-    au! wtfwin
-  endfunction
-
-endfunction
-
-" Maps: {{{1
-nnoremap <Plug>wtf1 :call <SID>MyScriptLocalFunction()<CR>
-nnoremap <Plug>wtf2 :call MyPublicFunction()<CR>
-
-if !hasmapto('<Plug>PublicPlugName1')
-  nmap <unique><silent> <leader>p1 <Plug>wtf1
-endif
-
-if !hasmapto('<Plug>PublicPlugName2')
-  nmap <unique><silent> <leader>p2 <Plug>wtf2
-endif
-
 " Commands: {{{1
-command! -nargs=0 -bar WTF call WTF(&fo)
+command! -nargs=0 -bar WTF call WTF().setup_wtf_win()
 
 " Teardown:{{{1
 "reset &cpo back to users setting
